@@ -330,7 +330,7 @@
             DISCOUNT_ENGINEERING: 'DISCOUNT_ENGINEERING'
         };
 
-        // Mutations applied every 15 waves - kept minimal for performance
+        // Mutations applied every 15 wave intervals (45s each) - kept minimal for performance
         const MutationType = {
             ENEMY_HP: 'ENEMY_HP',           // +30% enemy HP
             ENEMY_SPEED: 'ENEMY_SPEED',      // +20% enemy speed
@@ -788,7 +788,13 @@
                     g.stroke({ width: 1, color: 0xfde047 });
                 },
                 regenCross: (g, r, pulse) => { if (pulse > 0.7) g.rect(r - 2, -r - 6, 8, 2).rect(r + 1, -r - 9, 2, 8).fill(0x86efac); },
-                rangeCircle: (g, x, y, r, c, a = 0.1) => g.circle(x, y, r).fill({ color: c, alpha: a }).circle(x, y, r).stroke({ width: 1, color: c, alpha: a * 3 })
+                rangeCircle: (g, x, y, r, c, a = 0.1) => g.circle(x, y, r).fill({ color: c, alpha: a }).circle(x, y, r).stroke({ width: 1, color: c, alpha: a * 3 }),
+                bossAura: (g, r, time, color) => {
+                    const pulse = 0.5 + Math.sin(time * 0.005) * 0.2;
+                    const c = RenderSystem.hexToNum(color);
+                    g.circle(0, 0, r * (1.2 + pulse * 0.3)).stroke({ width: 4, color: c, alpha: 0.3 * pulse });
+                    g.circle(0, 0, r * (1.4 + pulse * 0.5)).stroke({ width: 2, color: c, alpha: 0.15 * pulse });
+                }
             },
 
             createEntityContainer: (labels) => {
@@ -1012,6 +1018,11 @@
                         if (entity.traits.includes(EnemyTrait.RESIST_SLOW)) T.resistSlowArrow(traits, r, Math.atan2(dims.h / 2 - entity.y, dims.w / 2 - entity.x));
                         if (entity.traits.includes(EnemyTrait.RESIST_STUN)) T.resistStunStar(traits, r, state.gameTime * 0.005);
                         if (entity.traits.includes(EnemyTrait.REGEN)) T.regenCross(traits, r, Math.abs(Math.sin(state.gameTime * 0.01)));
+                    }
+
+                    if (entity.type === EnemyType.BOSS || entity.type === EnemyType.MINIBOSS) {
+                        const aura = get('bossAura'); aura.clear();
+                        RenderSystem.Drawers.bossAura(aura, entity.radius, state.gameTime, ENEMY_STATS[entity.type].color);
                     }
                 } else if (schemaType === 'TURRET') {
                     const sprite = get('shapeSprite', PIXI.Sprite), shape = TURRET_SHAPES[entity.type] || TURRET_SHAPES.DEFAULT;
@@ -3401,7 +3412,8 @@
                                 { id: 'TYPES', l: 'Enemy Types', i: Hexagon },
                                 { id: 'EFFECTS', l: 'Status Effects', i: Flame },
                                 { id: 'COMBOS', l: 'Combos', i: Zap },
-                                { id: 'TRAITS', l: 'Traits', i: Shield }
+                                { id: 'TRAITS', l: 'Traits', i: Shield },
+                                { id: 'MUTATIONS', l: 'Mutations', i: Cpu }
                             ].map(t =>
                                 <button key={t.id} onClick={() => setCodexTab(t.id)}
                                     className={`flex-1 py-3 px-4 flex justify-center gap-2 ${codexTab === t.id
@@ -3457,7 +3469,94 @@
                             {codexTab === 'EFFECTS' && <div className="grid grid-cols-3 gap-6">{CODEX_DATA.EFFECTS.map(e => <CodexCard key={e.id || e.title} title={e.title} icon={e.icon} iconBgClass={e.iconBgClass} description={e.description}>{CodexVisuals[e.visual]}</CodexCard>)}</div>}
                             {codexTab === 'COMBOS' && <div className="grid grid-cols-2 gap-4">{CODEX_DATA.COMBOS.map(c => <CodexCard key={c.title} title={c.title} icon={c.icon} iconBgClass={c.iconBgClass} description={c.description}>{CodexVisuals[c.visual]}</CodexCard>)}</div>}
                             {codexTab === 'TRAITS' && <div className="grid grid-cols-3 gap-6">{CODEX_DATA.TRAITS.map(t => <CodexCard key={t.id} title={t.name} icon={t.icon} iconBgClass={`bg-${t.color}-500`} description={t.description}>{CodexVisuals[t.visual]}</CodexCard>)}</div>}
+                            {codexTab === 'MUTATIONS' && (() => {
+                                const activeMutations = useGameStore.getState().activeMutations || [];
+                                return (
+                                    <div className="space-y-6">
+                                        <div className="text-slate-400 text-sm italic mb-4 text-center">Mutations are permanent enemy buffs applied every 11.25 minutes (15 waves of 45s).</div>
+                                        {activeMutations.length > 0 ? (
+                                            <div className="grid grid-cols-2 gap-4">
+                                                {activeMutations.map(mType => {
+                                                    const m = MUTATION_DEFS[mType];
+                                                    return (
+                                                        <div key={mType} className="bg-slate-800 p-4 rounded-xl border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.1)]">
+                                                            <div className="flex items-center gap-3 mb-2">
+                                                                <div className="p-2 bg-purple-500/20 rounded-lg">
+                                                                    <Activity className="w-5 h-5 text-purple-400" />
+                                                                </div>
+                                                                <div className="font-bold text-lg text-white font-orbitron uppercase tracking-wider">{m.name}</div>
+                                                            </div>
+                                                            <div className="text-slate-400 text-sm pl-11">
+                                                                {Object.entries(m.mult).map(([k, v]) => (
+                                                                    <div key={k} className="flex justify-between border-b border-slate-700/50 py-1">
+                                                                        <span className="capitalize">{k.replace(/([A-Z])/g, ' $1')}</span>
+                                                                        <span className="text-purple-400 font-mono">+{Math.round((v - 1) * 100)}%</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-4">
+                                                <Activity className="w-16 h-16 opacity-20" />
+                                                <div className="text-xl font-orbitron tracking-widest uppercase">No Active Mutations</div>
+                                                <div className="text-sm italic">Survive longer to witness evolution...</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const BossHealthBar = () => {
+            const { gameState } = useGameStore(s => ({ gameState: s.gameState }), shallowStr);
+            if (gameState !== GameStatus.PLAYING) return null;
+
+            // Find the strongest boss currently alive
+            let maxHp = -1;
+            let currentHp = 0;
+            let bossName = "";
+            let bossColor = "#f43f5e";
+
+            for (let i = 0; i < enemySystem.count; i++) {
+                if (enemySystem.type[i] === EnemyType.BOSS || enemySystem.type[i] === EnemyType.MINIBOSS) {
+                    if (enemySystem.hp[i] > maxHp) {
+                        maxHp = enemySystem.maxHp[i];
+                        currentHp = enemySystem.hp[i];
+                        bossName = enemySystem.type[i] === EnemyType.BOSS ? "ANNIHILATOR UNIT" : "MINIBOSS OVERSEER";
+                        bossColor = enemySystem.type[i] === EnemyType.BOSS ? "#ec4899" : "#f43f5e";
+                    }
+                }
+            }
+
+            if (maxHp <= 0) return null;
+
+            return (
+                <div className="absolute top-12 left-1/2 -translate-x-1/2 w-[500px] z-40 animate-slide-down">
+                    <div className="flex justify-between items-end mb-1 px-1">
+                        <span className="text-[10px] font-orbitron tracking-[0.3em] text-white/50 uppercase">Hostile Signature Detected</span>
+                        <span className="text-xs font-bold text-white font-orbitron tracking-widest">{bossName}</span>
+                    </div>
+                    <div className="h-4 w-full bg-slate-900 rounded-full border border-white/10 p-0.5 overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+                        <div
+                            className="h-full rounded-full transition-all duration-300 relative overflow-hidden"
+                            style={{
+                                width: `${(currentHp / maxHp) * 100}%`,
+                                backgroundColor: bossColor,
+                                boxShadow: `0 0 10px ${bossColor}`
+                            }}
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent animate-shimmer" style={{ backgroundSize: '200% 100%' }} />
+                        </div>
+                    </div>
+                    <div className="flex justify-center mt-1">
+                        <span className="text-[10px] font-mono text-white/70">{Math.ceil(currentHp)} / {maxHp} UNIT INTEGRITY</span>
                     </div>
                 </div>
             );
@@ -3901,12 +4000,12 @@
                 const centerX = dims.w / 2;
                 const centerY = dims.h / 2;
 
-                // Wave tracking (1 wave = 30 seconds for simplicity)
-                const currentWave = Math.floor(state.gameTime / 30000) + 1;
+                // Wave tracking (1 wave = 45 seconds)
+                const currentWave = Math.floor(state.gameTime / 45000) + 1;
                 if (currentWave !== state.waveNumber) {
                     state.waveNumber = currentWave;
 
-                    // Mutation trigger every 15 waves
+                    // Mutation trigger every 15 waves (approx. 11m 15s)
                     if (currentWave > 0 && currentWave % 15 === 0 && currentWave !== state.lastMutationWave) {
                         state.lastMutationWave = currentWave;
                         const mutationTypes = Object.values(MutationType);
@@ -5878,6 +5977,7 @@
                     <CoreMenu spawnParticles={spawnParticles} />
                     <TurretDetailPanel spawnParticles={spawnParticles} />
                     <BuildMenu />
+                    <BossHealthBar />
                     <UpgradesPanel />
                     {showTechLab && <TechLabModal />}
                     <GameOverlays earnedTechPoints={earnedTechPoints} />
